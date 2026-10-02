@@ -1,0 +1,2 @@
+# MVP core uses Python standard library only.
+# Add HTTP dependencies when official source adapters are implemented.
