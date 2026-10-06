@@ -1,12 +1,20 @@
 from urllib.parse import urlencode
 
 RND_LAB_SEARCH_BASE = "https://www.rnd.or.kr/user/infoservice/search5.do"
+RND_LAB_BUSINESS_NUMBER_INPUT_ID = "s_custsuno1"
+RND_LAB_BUSINESS_NUMBER_SELECTOR = f"#{RND_LAB_BUSINESS_NUMBER_INPUT_ID}"
+
+
+def normalize_business_number(value: str) -> str:
+    digits = "".join(ch for ch in (value or "") if ch.isdigit())
+    if len(digits) != 10:
+        raise ValueError("사업자등록번호는 숫자 10자리여야 합니다.")
+    return digits
 
 
 def build_rnd_lab_search_url(business_number: str) -> str:
-    digits = "".join(ch for ch in (business_number or "") if ch.isdigit())
-    if len(digits) != 10:
-        raise ValueError("사업자등록번호는 숫자 10자리여야 합니다.")
+    """보조용 GET URL. 가능하면 실제 브라우저에서 #s_custsuno1 입력 후 검색 실행을 우선한다."""
+    digits = normalize_business_number(business_number)
     params = {
         "currentPage": "1",
         "excel_yn": "N",
@@ -17,6 +25,18 @@ def build_rnd_lab_search_url(business_number: str) -> str:
         "save_s_yngugubn": "3",
     }
     return f"{RND_LAB_SEARCH_BASE}?{urlencode(params)}"
+
+
+def build_rnd_lab_browser_steps(business_number: str) -> dict:
+    """브라우저 자동화 구현에 사용할 정확한 입력 대상을 반환한다."""
+    digits = normalize_business_number(business_number)
+    return {
+        "url": RND_LAB_SEARCH_BASE,
+        "business_number": digits,
+        "input_id": RND_LAB_BUSINESS_NUMBER_INPUT_ID,
+        "input_selector": RND_LAB_BUSINESS_NUMBER_SELECTOR,
+        "action": "fill_business_number_then_click_search",
+    }
 
 
 OFFICIAL_SOURCES = {
@@ -36,6 +56,8 @@ OFFICIAL_SOURCES = {
         "purpose": "기업부설연구소 및 연구개발전담부서 공식 검색",
         "search_key": "사업자번호 10자리 직접검색 우선, 0건일 때만 기업명 보조검색",
         "business_number_param": "s_custsuno1",
+        "business_number_input_id": RND_LAB_BUSINESS_NUMBER_INPUT_ID,
+        "business_number_selector": RND_LAB_BUSINESS_NUMBER_SELECTOR,
     },
 }
 
