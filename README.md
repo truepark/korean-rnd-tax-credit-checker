@@ -31,9 +31,9 @@
 - 사업자번호 입력: `input#s_custsuno1[name="s_custsuno1"]`
 - 입력값: 하이픈 없는 숫자 10자리
 - 검색 버튼 문구: `검색하기`
-- 결과: `기업명 / 연구소·전담부서명 / 규모 / 연구분야 / 구분`
+- 검색결과 표: `기업명 / 연구소·전담부서명 / 규모 / 연구분야 / 구분`
 
-사이트가 검색 버튼 클릭 후 결과를 생성하므로 단순 URL 조합이 아니라 Playwright로 실제 브라우저를 조작합니다.
+공식 페이지는 검색 화면에서 조건을 입력한 뒤 결과를 생성하는 구조이므로 단순 검색엔진 조회나 URL 문자열 조합 대신 Playwright로 실제 브라우저를 조작합니다.
 
 설치:
 
@@ -48,7 +48,7 @@ playwright install chromium
 python scripts/rnd_lab_lookup.py 1198683629
 ```
 
-브라우저 창을 보면서 테스트하려면:
+브라우저 창을 직접 보면서 테스트하려면:
 
 ```bash
 python scripts/rnd_lab_lookup.py 1198683629 --show-browser
@@ -63,7 +63,27 @@ result = lookup_rnd_lab("119-86-83629")
 print(result.to_dict())
 ```
 
-정상 조회 시 예시는 다음 구조입니다.
+## 로컬 MCP로 연결
+
+`mcp_server.py`에는 `search_rnd_lab` MCP 도구가 포함되어 있습니다. Playwright가 실제 rnd.or.kr 페이지를 열고 `#s_custsuno1`에 사업자번호를 입력한 뒤 `검색하기`를 실행합니다.
+
+서버 테스트:
+
+```bash
+python mcp_server.py
+```
+
+ChatGPT Desktop/Codex의 STDIO MCP 설정에서는 Python 실행파일과 이 저장소의 `mcp_server.py` 절대경로를 등록하면 됩니다. 등록 후 사용할 도구명은 `search_rnd_lab`입니다.
+
+도구 입력 예:
+
+```json
+{
+  "business_number": "1198683629"
+}
+```
+
+정상 결과 예:
 
 ```json
 {
@@ -140,19 +160,15 @@ print(result)
 
 ## 현재 한계
 
-`lookup_rnd_lab()` 자체는 Playwright가 설치된 실행환경에서 실제 브라우저를 사용합니다. ChatGPT의 skills-only 플러그인은 Python/Playwright를 직접 실행하는 도구가 아니므로, ChatGPT 안에서 이 함수를 자동 호출하려면 이 조회 함수를 MCP/API 도구로 별도 연결해야 합니다.
+`lookup_rnd_lab()`은 Playwright가 설치된 환경에서 실제 브라우저로 공식 페이지를 검색할 수 있습니다. 다만 skills-only ChatGPT 플러그인 자체에는 임의 Python 코드를 실행하는 런타임이 없으므로, ChatGPT 대화에서 자동 호출하려면 `mcp_server.py`를 로컬/호스팅 MCP로 연결해야 합니다.
 
-즉 저장소 코드는 실제 조회가 가능하지만, 플러그인에서 완전 자동 호출하려면 다음 단계가 필요합니다.
-
-- Playwright가 설치된 서버 또는 로컬 MCP에서 `lookup_rnd_lab` 실행
-- 입력: 사업자번호 10자리
-- 출력: 등록여부, 기업명, 연구소/전담부서명, 규모, 연구분야, 구분
-- ChatGPT 플러그인에서 해당 MCP/API 도구 호출
+또한 사이트가 HTML 구조나 검색 버튼 동작을 변경하면 selector를 업데이트해야 할 수 있습니다.
 
 ## 구조
 
 - `rnd_tax_checker/` : 판정 엔진 및 rnd.or.kr 직접조회
 - `scripts/rnd_lab_lookup.py` : 사업자번호 조회 CLI
+- `mcp_server.py` : `search_rnd_lab` STDIO MCP 도구
 - `skills/rnd-tax-credit-check/` : ChatGPT 플러그인 워크플로우
 - `docs/` : 공식 데이터소스 및 판정 규칙
 - `examples/` : 예시
