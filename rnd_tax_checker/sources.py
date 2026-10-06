@@ -9,10 +9,11 @@ OFFICIAL_SOURCES = {
         "url": "https://www.knab.go.kr/",
         "purpose": "공인시험기관 및 인정범위 확인",
     },
-    "koita": {
-        "name": "한국산업기술진흥협회",
-        "url": "https://www.koita.or.kr/",
-        "purpose": "기업부설연구소/연구개발전담부서 관련 확인",
+    "rnd_lab": {
+        "name": "기업부설연구소/전담부서 신고관리시스템",
+        "url": "https://www.rnd.or.kr/user/infoservice/search5.do",
+        "purpose": "기업부설연구소 및 연구개발전담부서 공식 검색",
+        "search_key": "사업자번호 우선, 미조회 시 기업명 보조검색",
     },
 }
 
