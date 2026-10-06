@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "korean-rnd-tax-credit-checker",
-  "version": "0.2.5",
-  "description": "한국 연구개발비 세액공제 외부 시험·연구기관의 별표6 적격성 검토를 돕는 워크플로우",
+  "version": "0.3.0",
+  "description": "한국 연구개발비 세액공제 외부 시험·연구기관의 별표6 적격성 검토와 rnd.or.kr 사업자번호 직접조회를 지원하는 워크플로우",
   "skills": "./skills/",
   "repository": "https://github.com/truepark/korean-rnd-tax-credit-checker",
   "keywords": ["korea", "tax", "rnd", "kolas", "ksic", "research"]
