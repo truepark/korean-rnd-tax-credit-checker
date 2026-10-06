@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "korean-rnd-tax-credit-checker",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "한국 연구개발비 세액공제 외부 시험·연구기관의 별표6 적격성 검토를 돕는 워크플로우",
   "skills": "./skills/",
   "repository": "https://github.com/truepark/korean-rnd-tax-credit-checker",
