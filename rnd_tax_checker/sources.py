@@ -2,18 +2,21 @@ from urllib.parse import urlencode
 
 RND_LAB_SEARCH_BASE = "https://www.rnd.or.kr/user/infoservice/search5.do"
 RND_LAB_BUSINESS_NUMBER_INPUT_ID = "s_custsuno1"
-RND_LAB_BUSINESS_NUMBER_SELECTOR = f"#{RND_LAB_BUSINESS_NUMBER_INPUT_ID}"
+RND_LAB_BUSINESS_NUMBER_INPUT_NAME = "s_custsuno1"
+RND_LAB_BUSINESS_NUMBER_INPUT_CLASS = "c__input"
+RND_LAB_BUSINESS_NUMBER_MAXLENGTH = 10
+RND_LAB_BUSINESS_NUMBER_SELECTOR = 'input#s_custsuno1[name="s_custsuno1"]'
 
 
 def normalize_business_number(value: str) -> str:
     digits = "".join(ch for ch in (value or "") if ch.isdigit())
-    if len(digits) != 10:
-        raise ValueError("사업자등록번호는 숫자 10자리여야 합니다.")
+    if len(digits) != RND_LAB_BUSINESS_NUMBER_MAXLENGTH:
+        raise ValueError("사업자등록번호는 하이픈 없는 숫자 10자리여야 합니다.")
     return digits
 
 
 def build_rnd_lab_search_url(business_number: str) -> str:
-    """보조용 GET URL. 가능하면 실제 브라우저에서 #s_custsuno1 입력 후 검색 실행을 우선한다."""
+    """보조용 GET URL. 공식 확인은 가능하면 실제 input에 입력 후 검색 실행을 우선한다."""
     digits = normalize_business_number(business_number)
     params = {
         "currentPage": "1",
@@ -28,14 +31,32 @@ def build_rnd_lab_search_url(business_number: str) -> str:
 
 
 def build_rnd_lab_browser_steps(business_number: str) -> dict:
-    """브라우저 자동화 구현에 사용할 정확한 입력 대상을 반환한다."""
+    """rnd.or.kr 실제 사업자번호 입력요소에 맞춘 브라우저 자동화 계약을 반환한다."""
     digits = normalize_business_number(business_number)
     return {
         "url": RND_LAB_SEARCH_BASE,
         "business_number": digits,
-        "input_id": RND_LAB_BUSINESS_NUMBER_INPUT_ID,
-        "input_selector": RND_LAB_BUSINESS_NUMBER_SELECTOR,
-        "action": "fill_business_number_then_click_search",
+        "input": {
+            "type": "text",
+            "id": RND_LAB_BUSINESS_NUMBER_INPUT_ID,
+            "name": RND_LAB_BUSINESS_NUMBER_INPUT_NAME,
+            "class": RND_LAB_BUSINESS_NUMBER_INPUT_CLASS,
+            "maxlength": RND_LAB_BUSINESS_NUMBER_MAXLENGTH,
+            "placeholder": "000-00-00000",
+            "selector": RND_LAB_BUSINESS_NUMBER_SELECTOR,
+            "value_format": "10 digits without hyphens",
+        },
+        "steps": [
+            "open_search_page",
+            "locate_business_number_input",
+            "clear_existing_value",
+            "fill_10_digit_business_number",
+            "dispatch_input_change_and_optional_blur",
+            "verify_input_value_equals_business_number",
+            "click_search_or_submit_form",
+            "wait_for_result_table_or_count_change",
+            "parse_results",
+        ],
     }
 
 
@@ -57,13 +78,17 @@ OFFICIAL_SOURCES = {
         "search_key": "사업자번호 10자리 직접검색 우선, 0건일 때만 기업명 보조검색",
         "business_number_param": "s_custsuno1",
         "business_number_input_id": RND_LAB_BUSINESS_NUMBER_INPUT_ID,
+        "business_number_input_name": RND_LAB_BUSINESS_NUMBER_INPUT_NAME,
         "business_number_selector": RND_LAB_BUSINESS_NUMBER_SELECTOR,
+        "business_number_maxlength": RND_LAB_BUSINESS_NUMBER_MAXLENGTH,
+        "business_number_value_format": "digits_only",
     },
 }
 
 RND_LOOKUP_STATUS = {
     "confirmed": "공식 확인",
     "zero_results": "공식 검색 0건",
+    "input_value_failed": "입력값 설정 실패",
     "execution_unavailable": "직접검색 실행 불가",
 }
 
