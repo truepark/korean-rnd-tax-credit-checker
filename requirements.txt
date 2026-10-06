@@ -1,3 +1,5 @@
 # Core checker uses the Python standard library.
 # rnd.or.kr direct business-number lookup uses Playwright browser automation.
 playwright>=1.48
+# Optional/local MCP tool for ChatGPT Desktop/Codex integration.
+mcp>=1.2.0
