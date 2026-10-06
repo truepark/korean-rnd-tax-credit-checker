@@ -1,2 +1,3 @@
-# MVP core uses Python standard library only.
-# Add HTTP dependencies when official source adapters are implemented.
+# Core checker uses the Python standard library.
+# rnd.or.kr direct business-number lookup uses Playwright browser automation.
+playwright>=1.48
