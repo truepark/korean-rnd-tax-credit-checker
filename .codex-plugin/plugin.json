@@ -1,6 +1,6 @@
 {
   "name": "korean-rnd-tax-credit-checker",
-  "version": "0.2.0",
+  "version": "0.2.3",
   "description": "사업자번호를 기준으로 전문연구사업자, KSIC, KOLAS, 기업부설연구소를 확인하고 조특법 시행령 별표6 적격 가능성을 검토합니다.",
   "skills": "./skills/"
 }
