@@ -8,8 +8,12 @@ from starlette.responses import JSONResponse
 
 from rnd_tax_checker.rnd_or_kr import lookup_rnd_lab
 
+PORT = int(os.getenv("PORT", "10000"))
+
 mcp = FastMCP(
     "korean-rnd-tax-credit-checker",
+    host="0.0.0.0",
+    port=PORT,
     stateless_http=True,
     json_response=True,
 )
@@ -31,9 +35,4 @@ async def health(_: Request) -> JSONResponse:
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "10000"))
-    mcp.run(
-        transport="streamable-http",
-        host="0.0.0.0",
-        port=port,
-    )
+    mcp.run(transport="streamable-http")
