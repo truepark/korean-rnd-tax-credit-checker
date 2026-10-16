@@ -1,5 +1,6 @@
-# Core checker uses the Python standard library.
-# rnd.or.kr direct business-number lookup uses Playwright browser automation.
+# rnd.or.kr direct business-number lookup: HTTP POST first, browser fallback.
+requests>=2.32
+beautifulsoup4>=4.12
 playwright>=1.48
 # Local/remote MCP support.
 mcp>=1.2.0
