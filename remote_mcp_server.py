@@ -34,5 +34,12 @@ async def health(_: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "service": "korean-rnd-tax-credit-checker-mcp"})
 
 
+@mcp.custom_route("/search-rnd-lab/{business_number}", methods=["GET"])
+async def search_rnd_lab_http(request: Request) -> JSONResponse:
+    business_number = request.path_params["business_number"]
+    result = lookup_rnd_lab(business_number, headless=True).to_dict()
+    return JSONResponse(result)
+
+
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")
