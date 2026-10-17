@@ -44,7 +44,6 @@ class RndLabLookupResult:
 
 
 def normalize_business_number(value: str) -> str:
-    """하이픈/공백 등 숫자가 아닌 문자를 제거하고 10자리 사업자번호로 정규화한다."""
     digits = "".join(ch for ch in (value or "") if ch.isdigit())
     if len(digits) != 10:
         raise ValueError("사업자등록번호는 하이픈 포함 여부와 관계없이 숫자 10자리여야 합니다.")
@@ -64,6 +63,18 @@ def _parse_total_count_text(text: str) -> int | None:
     return None
 
 
+def _clean_header(value: str) -> str:
+    return re.sub(r"\s+", "", value or "").replace("·", "").replace("/", "")
+
+
+def _header_index(headers: list[str], *keywords: str) -> int | None:
+    cleaned = [_clean_header(h) for h in headers]
+    for i, header in enumerate(cleaned):
+        if any(_clean_header(k) in header for k in keywords):
+            return i
+    return None
+
+
 def _parse_html_records(html: str) -> tuple[int | None, list[RndLabRecord]]:
     from bs4 import BeautifulSoup
 
@@ -72,25 +83,52 @@ def _parse_html_records(html: str) -> tuple[int | None, list[RndLabRecord]]:
     records: list[RndLabRecord] = []
 
     for table in soup.find_all("table"):
-        headers = [th.get_text(" ", strip=True) for th in table.find_all("th")]
-        header_text = " | ".join(headers)
-        if not ("기업명" in header_text and "연구소" in header_text and "구분" in header_text):
+        rows = table.find_all("tr")
+        if not rows:
             continue
 
-        for row in table.find_all("tr"):
-            cells = [td.get_text(" ", strip=True) for td in row.find_all("td")]
-            if len(cells) < 6:
+        header_cells = rows[0].find_all(["th", "td"])
+        headers = [c.get_text(" ", strip=True) for c in header_cells]
+        header_text = " | ".join(headers)
+        if not ("기업명" in header_text and ("연구소" in header_text or "전담부서" in header_text) and "구분" in header_text):
+            continue
+
+        idx_company = _header_index(headers, "기업명")
+        idx_lab = _header_index(headers, "연구소전담부서명", "연구소명", "전담부서명", "연구소")
+        idx_scale = _header_index(headers, "규모")
+        idx_field = _header_index(headers, "연구분야", "연구분야명")
+        idx_type = _header_index(headers, "구분")
+
+        for row in rows[1:]:
+            cells = row.find_all(["td", "th"])
+            values = [c.get_text(" ", strip=True) for c in cells]
+            if not values:
                 continue
-            # 예상 열: 번호, 기업명, 연구소/전담부서명, 규모, 연구분야, 구분, ...
+
+            def pick(idx: int | None) -> str:
+                return values[idx] if idx is not None and idx < len(values) else ""
+
+            company = pick(idx_company)
+            lab = pick(idx_lab)
+            scale = pick(idx_scale)
+            field = pick(idx_field)
+            lab_type = pick(idx_type)
+
+            if not company and not lab:
+                continue
+            if any(x in company for x in ("등록된 자료가 없습니다", "검색 결과가 없습니다")):
+                continue
+
             records.append(
                 RndLabRecord(
-                    company_name=cells[1],
-                    lab_name=cells[2],
-                    scale=cells[3],
-                    research_field=cells[4],
-                    lab_type=cells[5],
+                    company_name=company,
+                    lab_name=lab,
+                    scale=scale,
+                    research_field=field,
+                    lab_type=lab_type,
                 )
             )
+
         if records:
             break
 
@@ -100,7 +138,6 @@ def _parse_html_records(html: str) -> tuple[int | None, list[RndLabRecord]]:
 
 
 def _lookup_via_post(business_number: str, timeout_ms: int = 20000) -> RndLabLookupResult:
-    """개발자도구에서 확인된 search5.do POST 폼을 직접 재현한다."""
     digits = normalize_business_number(business_number)
     try:
         import requests
@@ -125,7 +162,7 @@ def _lookup_via_post(business_number: str, timeout_ms: int = 20000) -> RndLabLoo
         "save_s_custsuno1": digits,
         "save_s_custsuno2": "",
         "save_s_custsuno3": "",
-        "s_custgwmo": "",
+        "s_custgymo": "",
         "s_yngu_si": "",
         "save_s_yngu_gun": "",
         "s_custksic": "",
@@ -150,7 +187,6 @@ def _lookup_via_post(business_number: str, timeout_ms: int = 20000) -> RndLabLoo
     try:
         timeout = timeout_ms / 1000
         with requests.Session() as session:
-            # 먼저 검색페이지를 열어 세션/쿠키를 확보한다.
             session.get(RND_SEARCH_URL, headers=headers, timeout=timeout)
             response = session.post(
                 RND_SEARCH_URL,
@@ -162,22 +198,44 @@ def _lookup_via_post(business_number: str, timeout_ms: int = 20000) -> RndLabLoo
             response.encoding = response.apparent_encoding or response.encoding
             total_count, records = _parse_html_records(response.text)
 
-        if total_count == 0 or (total_count is None and not records):
+        if total_count == 0:
             return RndLabLookupResult(
                 status="zero_results",
                 business_number=digits,
                 input_value=digits,
-                total_count=0 if total_count == 0 else total_count,
+                total_count=0,
                 records=[],
                 lookup_method="POST",
             )
 
+        if records:
+            return RndLabLookupResult(
+                status="confirmed",
+                business_number=digits,
+                input_value=digits,
+                total_count=total_count if total_count is not None else len(records),
+                records=records,
+                lookup_method="POST",
+            )
+
+        if total_count is not None and total_count > 0:
+            return RndLabLookupResult(
+                status="response_parse_error",
+                business_number=digits,
+                input_value=digits,
+                total_count=total_count,
+                records=[],
+                error="검색 건수는 확인됐지만 결과 행 파싱에 실패했습니다.",
+                lookup_method="POST",
+            )
+
         return RndLabLookupResult(
-            status="confirmed",
+            status="unexpected_response",
             business_number=digits,
             input_value=digits,
-            total_count=total_count if total_count is not None else len(records),
-            records=records,
+            total_count=total_count,
+            records=[],
+            error="검색 결과 구조를 확인하지 못했습니다.",
             lookup_method="POST",
         )
     except Exception as exc:
@@ -202,7 +260,7 @@ def _find_result_table(page):
             text = table.inner_text(timeout=1500)
         except Exception:
             continue
-        if "기업명" in text and "연구소" in text and "구분" in text:
+        if "기업명" in text and ("연구소" in text or "전담부서" in text) and "구분" in text:
             return table
     return None
 
@@ -211,14 +269,33 @@ def _parse_records_page(page) -> list[RndLabRecord]:
     table = _find_result_table(page)
     if table is None:
         return []
-    rows = table.locator("tbody tr")
+    rows = table.locator("tr")
+    if rows.count() < 2:
+        return []
+
+    header_cells = rows.nth(0).locator("th, td")
+    headers = [header_cells.nth(i).inner_text().strip() for i in range(header_cells.count())]
+    idx_company = _header_index(headers, "기업명")
+    idx_lab = _header_index(headers, "연구소전담부서명", "연구소명", "전담부서명", "연구소")
+    idx_scale = _header_index(headers, "규모")
+    idx_field = _header_index(headers, "연구분야", "연구분야명")
+    idx_type = _header_index(headers, "구분")
+
     records: list[RndLabRecord] = []
-    for i in range(rows.count()):
-        cells = rows.nth(i).locator("td")
+    for i in range(1, rows.count()):
+        cells = rows.nth(i).locator("td, th")
         values = [cells.nth(j).inner_text().strip() for j in range(cells.count())]
-        if len(values) < 6:
+        if not values:
             continue
-        records.append(RndLabRecord(values[1], values[2], values[3], values[4], values[5]))
+
+        def pick(idx: int | None) -> str:
+            return values[idx] if idx is not None and idx < len(values) else ""
+
+        company = pick(idx_company)
+        lab = pick(idx_lab)
+        if not company and not lab:
+            continue
+        records.append(RndLabRecord(company, lab, pick(idx_scale), pick(idx_field), pick(idx_type)))
     return records
 
 
@@ -296,9 +373,19 @@ def _lookup_via_playwright(business_number: str, *, headless: bool = True, timeo
             records = _parse_records_page(page)
             browser.close()
 
-            if total_count == 0 or (total_count is None and not records):
-                return RndLabLookupResult("zero_results", digits, digits, 0 if total_count == 0 else total_count, [], lookup_method="Playwright")
-            return RndLabLookupResult("confirmed", digits, digits, total_count or len(records), records, lookup_method="Playwright")
+            if total_count == 0:
+                return RndLabLookupResult("zero_results", digits, digits, 0, [], lookup_method="Playwright")
+            if records:
+                return RndLabLookupResult("confirmed", digits, digits, total_count or len(records), records, lookup_method="Playwright")
+            return RndLabLookupResult(
+                "response_parse_error",
+                digits,
+                digits,
+                total_count,
+                [],
+                error="브라우저 검색 결과 행 파싱에 실패했습니다.",
+                lookup_method="Playwright",
+            )
     except Exception as exc:
         return RndLabLookupResult(
             status="execution_error",
@@ -310,13 +397,20 @@ def _lookup_via_playwright(business_number: str, *, headless: bool = True, timeo
 
 
 def lookup_rnd_lab(business_number: str, *, headless: bool = True, timeout_ms: int = 20000) -> RndLabLookupResult:
-    """사업자번호로 rnd.or.kr 연구소/전담부서 등록 여부를 조회한다.
-
-    1) 입력값에서 하이픈/공백을 제거해 숫자 10자리로 정규화
-    2) 개발자도구에서 확인된 search5.do POST 검색을 우선 실행
-    3) POST 방식 자체가 실행 오류인 경우에만 Playwright로 fallback
-    """
     post_result = _lookup_via_post(business_number, timeout_ms=timeout_ms)
-    if post_result.status not in {"http_dependency_missing", "http_execution_error"}:
+    if post_result.status in {"confirmed", "zero_results"}:
         return post_result
-    return _lookup_via_playwright(business_number, headless=headless, timeout_ms=timeout_ms)
+    if post_result.status in {
+        "http_dependency_missing",
+        "http_execution_error",
+        "response_parse_error",
+        "unexpected_response",
+    }:
+        browser_result = _lookup_via_playwright(business_number, headless=headless, timeout_ms=timeout_ms)
+        if browser_result.status in {"confirmed", "zero_results"}:
+            return browser_result
+        if post_result.total_count is not None and browser_result.total_count is None:
+            browser_result.total_count = post_result.total_count
+        browser_result.error = browser_result.error or post_result.error
+        return browser_result
+    return post_result
