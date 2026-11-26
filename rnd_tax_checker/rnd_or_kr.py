@@ -83,6 +83,30 @@ def _parse_html_records(html: str) -> tuple[int | None, list[RndLabRecord]]:
     from bs4 import BeautifulSoup
 
     soup = BeautifulSoup(html, "html.parser")
+    section = soup.select_one(".search-table-section")
+    if section is not None:
+        count_node = section.select_one(".table-total .total-number")
+        count_text = count_node.get_text(strip=True).replace(",", "") if count_node else ""
+        count = int(count_text) if count_text.isdigit() else None
+        records = []
+        for row in section.select(".c__table .tbody .tr"):
+            cells = row.find_all(recursive=False)
+            def field(cls, index):
+                node = row.select_one("." + cls)
+                if node is None and len(cells) == 7:
+                    node = cells[index]
+                return node.get_text(" ", strip=True) if node else ""
+            company, lab = field("company", 1), field("department", 2)
+            if company and lab:
+                records.append(RndLabRecord(company_name=company, lab_name=lab,
+                    scale=field("scale", 3), research_field=field("field", 4), lab_type=field("sort", 5)))
+        if count == 0 and not records:
+            if "등록된 게시글이 없습니다" not in section.get_text(" ", strip=True):
+                return None, []
+        if count and len(records) != count:
+            logger.warning("KOITA count mismatch count=%s parsed=%s", count, len(records))
+            return count, []
+        return count, records
     total_count = _parse_total_count_text(soup.get_text(" ", strip=True))
     records: list[RndLabRecord] = []
 
@@ -399,7 +423,7 @@ def _lookup_via_playwright(business_number: str, *, headless: bool = True, timeo
                     lookup_method="Playwright",
                 )
 
-            buttons = page.get_by_role("button", name="검색하기")
+            buttons = page.locator('button[onclick="goSearch()"]')
             if buttons.count() > 0:
                 buttons.first.click()
             else:
@@ -471,7 +495,7 @@ def lookup_rnd_lab(business_number: str, *, headless: bool = True, timeout_ms: i
             browser_result.total_count = post_result.total_count
         browser_result.error = f"POST [{post_result.status}]: {post_result.error}; Playwright [{browser_result.status}]: {browser_result.error}"
         if post_result.status == "response_parse_error" and post_result.total_count and not browser_result.records:
-            browser_result.status = "confirmed"
+            browser_result.status = "response_parse_error"
             browser_result.total_count = post_result.total_count
             browser_result.lookup_method = "POST"
         return browser_result
