@@ -91,19 +91,24 @@ def _parse_html_records(html: str) -> tuple[int | None, list[RndLabRecord]]:
         if not rows:
             continue
 
-        header_cells = rows[0].find_all(["th", "td"])
-        headers = [c.get_text(" ", strip=True) for c in header_cells]
-        header_text = " | ".join(headers)
-        if not ("기업명" in header_text and ("연구소" in header_text or "전담부서" in header_text) and "구분" in header_text):
+        header_pos = None
+        for pos, row in enumerate(rows):
+            candidate = [c.get_text(" ", strip=True) for c in row.find_all(["th", "td"], recursive=False)]
+            if (_header_index(candidate, "기업명", "회사명", "업체명", "기업체명", "기업체명칭") is not None
+                and _header_index(candidate, "연구소명", "전담부서명", "연구소", "연구개발전담부서") is not None):
+                headers = candidate
+                header_pos = pos
+                break
+        if header_pos is None:
             continue
 
-        idx_company = _header_index(headers, "기업명")
+        idx_company = _header_index(headers, "기업명", "회사명", "업체명", "기업체명", "기업체명칭")
         idx_lab = _header_index(headers, "연구소전담부서명", "연구소명", "전담부서명", "연구소")
         idx_scale = _header_index(headers, "규모")
         idx_field = _header_index(headers, "연구분야", "연구분야명")
         idx_type = _header_index(headers, "구분")
 
-        for row in rows[1:]:
+        for row in rows[header_pos + 1:]:
             cells = row.find_all(["td", "th"])
             values = [c.get_text(" ", strip=True) for c in cells]
             if not values:
@@ -136,6 +141,8 @@ def _parse_html_records(html: str) -> tuple[int | None, list[RndLabRecord]]:
         if records:
             break
 
+    if not records and total_count:
+        logger.warning("RND parser diagnostics count=%s table_headers=%s", total_count, [[c.get_text(" ", strip=True)[:80] for c in t.find_all("th")][:30] for t in soup.find_all("table")][:10])
     if total_count is None and records:
         total_count = len(records)
     return total_count, records
@@ -205,7 +212,7 @@ def _lookup_via_post(business_number: str, timeout_ms: int = 20000) -> RndLabLoo
             response.encoding = response.apparent_encoding or response.encoding
             total_count, records = _parse_html_records(response.text)
 
-        if total_count == 0:
+        if total_count == 0 and not records:
             return RndLabLookupResult(
                 status="zero_results",
                 business_number=digits,
@@ -423,5 +430,9 @@ def lookup_rnd_lab(business_number: str, *, headless: bool = True, timeout_ms: i
         if post_result.total_count is not None and browser_result.total_count is None:
             browser_result.total_count = post_result.total_count
         browser_result.error = f"POST [{post_result.status}]: {post_result.error}; Playwright [{browser_result.status}]: {browser_result.error}"
+        if post_result.status == "response_parse_error" and post_result.total_count and not browser_result.records:
+            browser_result.status = "confirmed"
+            browser_result.total_count = post_result.total_count
+            browser_result.lookup_method = "POST"
         return browser_result
     return post_result
