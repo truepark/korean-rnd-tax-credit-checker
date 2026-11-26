@@ -86,14 +86,14 @@ def _parse_html_records(html: str) -> tuple[int | None, list[RndLabRecord]]:
     total_count = _parse_total_count_text(soup.get_text(" ", strip=True))
     records: list[RndLabRecord] = []
 
-    for table in soup.find_all("table"):
-        rows = table.find_all("tr")
+    for table in soup.select("table, [role=table], [role=grid]"):
+        rows = table.select("tr, [role=row]")
         if not rows:
             continue
 
         header_pos = None
         for pos, row in enumerate(rows):
-            candidate = [c.get_text(" ", strip=True) for c in row.find_all(["th", "td"], recursive=False)]
+            candidate = [c.get_text(" ", strip=True) for c in row.select(":scope > th, :scope > td, :scope > [role=columnheader], :scope > [role=cell], :scope > [role=gridcell]")]
             if (_header_index(candidate, "기업명", "회사명", "업체명", "기업체명", "기업체명칭") is not None
                 and _header_index(candidate, "연구소명", "전담부서명", "연구소", "연구개발전담부서") is not None):
                 headers = candidate
@@ -109,7 +109,7 @@ def _parse_html_records(html: str) -> tuple[int | None, list[RndLabRecord]]:
         idx_type = _header_index(headers, "구분")
 
         for row in rows[header_pos + 1:]:
-            cells = row.find_all(["td", "th"])
+            cells = row.select(":scope > td, :scope > th, :scope > [role=cell], :scope > [role=gridcell], :scope > [role=rowheader]")
             values = [c.get_text(" ", strip=True) for c in cells]
             if not values:
                 continue
@@ -141,6 +141,46 @@ def _parse_html_records(html: str) -> tuple[int | None, list[RndLabRecord]]:
         if records:
             break
 
+    if not records and total_count:
+        # Label/value cards and responsive lists, not only HTML tables.
+        aliases = {
+            "company_name": ("기업명", "회사명", "업체명", "기업체명", "기업체명칭"),
+            "lab_name": ("연구소명", "전담부서명", "연구소전담부서명", "연구개발전담부서명"),
+            "scale": ("규모", "기업규모"),
+            "research_field": ("연구분야",),
+            "lab_type": ("구분", "연구소구분", "유형"),
+        }
+        for label in soup.find_all(["dt", "span", "strong", "label", "div", "p", "li"]):
+            if _clean_header(label.get_text(" ", strip=True)).rstrip(":") not in aliases["company_name"]:
+                continue
+            for parent in list(label.parents)[:5]:
+                if parent.name in ("body", "html", "form"):
+                    break
+                fields = {}
+                for node in parent.find_all(["dt", "span", "strong", "label", "div", "p", "li"]):
+                    key = _clean_header(node.get_text(" ", strip=True)).rstrip(":")
+                    field = next((k for k, names in aliases.items() if key in names), None)
+                    if not field:
+                        continue
+                    sibling = node.find_next_sibling()
+                    if sibling:
+                        value = sibling.get_text(" ", strip=True)
+                        if value and len(value) <= 200 and _clean_header(value) not in sum(aliases.values(), ()):
+                            fields[field] = value
+                if fields.get("company_name") and fields.get("lab_name"):
+                    record = RndLabRecord(**fields)
+                    if record not in records:
+                        records.append(record)
+                    break
+        if not records:
+            # Capture bounded public result markup for exact selector diagnosis.
+            for node in soup.find_all(string=re.compile(r"총\s*[0-9,]+\s*(?:건|개)")):
+                parent = node.parent
+                for _ in range(3):
+                    if parent.parent and parent.parent.name not in ("body", "html"):
+                        parent = parent.parent
+                logger.warning("RND result DOM excerpt: %s", str(parent)[:12000])
+                break
     if not records and total_count:
         logger.warning("RND parser diagnostics count=%s table_headers=%s", total_count, [[c.get_text(" ", strip=True)[:80] for c in t.find_all("th")][:30] for t in soup.find_all("table")][:10])
     if total_count is None and records:
