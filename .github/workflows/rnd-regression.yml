@@ -1,0 +1,35 @@
+name: RND regression
+on: [pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python -m compileall -q remote_mcp_server.py rnd_tax_checker
+      - run: |
+          python - <<'PY'
+          import asyncio
+          from unittest.mock import patch
+          from starlette.requests import Request
+          from rnd_tax_checker.rnd_or_kr import _parse_html_records, normalize_business_number
+          import remote_mcp_server as server
+          assert normalize_business_number("135-81-98342") == "1358198342"
+          count, records = _parse_html_records("<p>총 1건</p><table><tr><th>기업명</th><th>연구소명</th><th>구분</th></tr><tr><td>테스트</td><td>연구소</td><td>기업부설</td></tr></table>")
+          assert count == 1 and len(records) == 1
+          async def check():
+              def sync_lookup(*args, **kwargs):
+                  try:
+                      asyncio.get_running_loop()
+                  except RuntimeError:
+                      return {"status": "confirmed"}
+                  raise AssertionError("sync lookup on event loop")
+              req = Request({"type":"http","path_params":{"business_number":"1358198342"}})
+              with patch.object(server, "search_rnd_lab", sync_lookup):
+                  response = await server.search_rnd_lab_http(req)
+                  assert response.status_code == 200
+          asyncio.run(check())
+          PY

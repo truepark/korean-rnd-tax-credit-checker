@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import re
+import logging
+import time
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass, asdict
 from typing import Any
 
@@ -114,7 +118,7 @@ def _parse_html_records(html: str) -> tuple[int | None, list[RndLabRecord]]:
             field = pick(idx_field)
             lab_type = pick(idx_type)
 
-            if not company and not lab:
+            if not company or not lab:
                 continue
             if any(x in company for x in ("등록된 자료가 없습니다", "검색 결과가 없습니다")):
                 continue
@@ -187,13 +191,16 @@ def _lookup_via_post(business_number: str, timeout_ms: int = 20000) -> RndLabLoo
     try:
         timeout = timeout_ms / 1000
         with requests.Session() as session:
-            session.get(RND_SEARCH_URL, headers=headers, timeout=timeout)
+            initial = session.get(RND_SEARCH_URL, headers=headers, timeout=timeout)
+            initial.raise_for_status()
+            logger.info("RND GET status=%s", initial.status_code)
             response = session.post(
                 RND_SEARCH_URL,
                 data=payload,
                 headers=headers,
                 timeout=timeout,
             )
+            logger.info("RND POST status=%s bytes=%s", response.status_code, len(response.content))
             response.raise_for_status()
             response.encoding = response.apparent_encoding or response.encoding
             total_count, records = _parse_html_records(response.text)
@@ -316,6 +323,7 @@ def _lookup_via_playwright(business_number: str, *, headless: bool = True, timeo
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=headless)
             page = browser.new_page(locale="ko-KR")
+            page.set_default_timeout(timeout_ms)
             page.goto(RND_SEARCH_URL, wait_until="domcontentloaded", timeout=timeout_ms)
             input_box = page.locator(BUSINESS_NUMBER_SELECTOR).first
             if input_box.count() == 0:
@@ -369,8 +377,7 @@ def _lookup_via_playwright(business_number: str, *, headless: bool = True, timeo
             except Exception:
                 page.wait_for_timeout(1200)
 
-            total_count = _parse_total_count_page(page)
-            records = _parse_records_page(page)
+            total_count, records = _parse_html_records(page.content())
             browser.close()
 
             if total_count == 0:
@@ -397,7 +404,10 @@ def _lookup_via_playwright(business_number: str, *, headless: bool = True, timeo
 
 
 def lookup_rnd_lab(business_number: str, *, headless: bool = True, timeout_ms: int = 20000) -> RndLabLookupResult:
+    logger.info("RND lookup started")
+    started = time.monotonic()
     post_result = _lookup_via_post(business_number, timeout_ms=timeout_ms)
+    logger.info("RND POST result=%s count=%s elapsed=%.2f", post_result.status, post_result.total_count, time.monotonic()-started)
     if post_result.status in {"confirmed", "zero_results"}:
         return post_result
     if post_result.status in {
@@ -407,10 +417,11 @@ def lookup_rnd_lab(business_number: str, *, headless: bool = True, timeout_ms: i
         "unexpected_response",
     }:
         browser_result = _lookup_via_playwright(business_number, headless=headless, timeout_ms=timeout_ms)
+        logger.info("RND browser result=%s count=%s elapsed=%.2f", browser_result.status, browser_result.total_count, time.monotonic()-started)
         if browser_result.status in {"confirmed", "zero_results"}:
             return browser_result
         if post_result.total_count is not None and browser_result.total_count is None:
             browser_result.total_count = post_result.total_count
-        browser_result.error = browser_result.error or post_result.error
+        browser_result.error = f"POST [{post_result.status}]: {post_result.error}; Playwright [{browser_result.status}]: {browser_result.error}"
         return browser_result
     return post_result
