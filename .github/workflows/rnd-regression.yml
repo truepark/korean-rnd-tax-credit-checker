@@ -13,6 +13,7 @@ jobs:
       - run: |
           python - <<'PY'
           import asyncio
+          import json
           from unittest.mock import patch
           from starlette.requests import Request
           from rnd_tax_checker.rnd_or_kr import _parse_html_records, normalize_business_number
@@ -44,8 +45,12 @@ jobs:
                       return {"status": "confirmed"}
                   raise AssertionError("sync lookup on event loop")
               req = Request({"type":"http","path_params":{"business_number":"1358198342"}})
-              with patch.object(server, "search_rnd_lab", sync_lookup):
+              with patch.object(server, "_search_rnd_lab_sync", sync_lookup):
+                  assert await server.search_rnd_lab("1358198342") == {"status": "confirmed"}
                   response = await server.search_rnd_lab_http(req)
                   assert response.status_code == 200
+                  assert json.loads(response.body) == {"status": "confirmed"}
+              invalid = await server.search_rnd_lab("12345")
+              assert invalid["status"] == "invalid_input"
           asyncio.run(check())
           PY
