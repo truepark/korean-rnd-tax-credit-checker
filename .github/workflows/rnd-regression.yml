@@ -22,10 +22,16 @@ jobs:
           assert count == 1 and len(records) == 1
           count, records = _parse_html_records("<p>총 1건</p><table><tr><td colspan='3'>검색결과</td></tr><tr><th>회 사 명</th><th>연구소 명</th><th>유형</th></tr><tr><td>테스트</td><td>연구소</td><td>기업부설</td></tr></table>")
           assert count == 1 and len(records) == 1
+          base = '<div class="search-table-section"><div class="table-total">총 <span class="total-number">{}</span>개</div><div class="c__table"><div class="tbody">{}</div></div></div>'
+          assert _parse_html_records(base.format(0, '<div class="tr">등록된 게시글이 없습니다.</div>')) == (0, [])
+          row = '<div class="tr"><div class="num">1</div><div class="company">테스트기업</div><div class="department">테스트연구소</div><div class="scale">중소기업</div><div class="field">기계</div><div class="sort">기업부설연구소</div><div class="product"></div></div>'
+          count, records = _parse_html_records(base.format(1, row))
+          assert count == 1 and len(records) == 1 and records[0].company_name == "테스트기업" and records[0].lab_name == "테스트연구소"
+          assert _parse_html_records(base.format(1, "")) == (1, [])
           from rnd_tax_checker import rnd_or_kr as rnd
           with patch.object(rnd, "_lookup_via_post", return_value=rnd.RndLabLookupResult("response_parse_error", "1358198342", total_count=1)), patch.object(rnd, "_lookup_via_playwright", return_value=rnd.RndLabLookupResult("response_parse_error", "1358198342")):
               result = rnd.lookup_rnd_lab("1358198342").to_dict()
-              assert result["status"] == "confirmed" and result["total_count"] == 1 and result["records"] == []
+              assert result["status"] == "response_parse_error" and result["total_count"] == 1 and result["records"] == []
           async def check():
               def sync_lookup(*args, **kwargs):
                   try:
