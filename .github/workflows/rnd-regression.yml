@@ -20,6 +20,12 @@ jobs:
           assert normalize_business_number("135-81-98342") == "1358198342"
           count, records = _parse_html_records("<p>총 1건</p><table><tr><th>기업명</th><th>연구소명</th><th>구분</th></tr><tr><td>테스트</td><td>연구소</td><td>기업부설</td></tr></table>")
           assert count == 1 and len(records) == 1
+          count, records = _parse_html_records("<p>총 1건</p><table><tr><td colspan='3'>검색결과</td></tr><tr><th>회 사 명</th><th>연구소 명</th><th>유형</th></tr><tr><td>테스트</td><td>연구소</td><td>기업부설</td></tr></table>")
+          assert count == 1 and len(records) == 1
+          from rnd_tax_checker import rnd_or_kr as rnd
+          with patch.object(rnd, "_lookup_via_post", return_value=rnd.RndLabLookupResult("response_parse_error", "1358198342", total_count=1)), patch.object(rnd, "_lookup_via_playwright", return_value=rnd.RndLabLookupResult("response_parse_error", "1358198342")):
+              result = rnd.lookup_rnd_lab("1358198342").to_dict()
+              assert result["status"] == "confirmed" and result["total_count"] == 1 and result["records"] == []
           async def check():
               def sync_lookup(*args, **kwargs):
                   try:
