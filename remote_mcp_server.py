@@ -24,8 +24,7 @@ mcp = FastMCP(
 )
 
 
-@mcp.tool()
-def search_rnd_lab(business_number: str) -> dict:
+def _search_rnd_lab_sync(business_number: str) -> dict:
     """사업자번호로 rnd.or.kr 기업부설연구소/연구개발전담부서 등록 여부를 공식 조회한다.
 
     사용자가 하이픈을 포함해 입력해도 내부에서 숫자 10자리로 정규화한다.
@@ -37,6 +36,12 @@ def search_rnd_lab(business_number: str) -> dict:
         return {"status": "invalid_input", "business_number": business_number, "total_count": None, "records": [], "error": str(exc), "lookup_method": ""}
 
 
+@mcp.tool()
+async def search_rnd_lab(business_number: str) -> dict:
+    """Look up official KOITA research lab registration by business number."""
+    return await run_in_threadpool(_search_rnd_lab_sync, business_number)
+
+
 @mcp.custom_route("/health", methods=["GET"])
 async def health(_: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "service": "korean-rnd-tax-credit-checker-mcp"})
@@ -45,7 +50,7 @@ async def health(_: Request) -> JSONResponse:
 @mcp.custom_route("/search-rnd-lab/{business_number}", methods=["GET"])
 async def search_rnd_lab_http(request: Request) -> JSONResponse:
     business_number = request.path_params["business_number"]
-    result = await run_in_threadpool(search_rnd_lab, business_number)
+    result = await search_rnd_lab(business_number)
     return JSONResponse(result)
 
 
