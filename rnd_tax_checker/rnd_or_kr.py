@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-import re
 import logging
+import re
 import time
-
-logger = logging.getLogger(__name__)
-from dataclasses import dataclass, asdict
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, field
+from datetime import date
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 RND_SEARCH_URL = "https://www.rnd.or.kr/user/infoservice/search5.do"
+RND_DETAIL_URL = "https://www.rnd.or.kr/user/infoservice/search_view.do"
 BUSINESS_NUMBER_SELECTOR = 'input#s_custsuno1[name="s_custsuno1"]'
 
 
@@ -19,9 +22,16 @@ class RndLabRecord:
     scale: str = ""
     research_field: str = ""
     lab_type: str = ""
+    first_recognition_date: str | None = None
+    company_address: str | None = None
+    lab_address: str | None = None
+    detail_status: str = "unavailable"
+    _detail_code: str = field(default="", repr=False, compare=False)
 
-    def to_dict(self) -> dict[str, str]:
-        return asdict(self)
+    def to_dict(self) -> dict[str, str | None]:
+        data = asdict(self)
+        del data["_detail_code"]
+        return data
 
 
 @dataclass
@@ -91,15 +101,19 @@ def _parse_html_records(html: str) -> tuple[int | None, list[RndLabRecord]]:
         records = []
         for row in section.select(".c__table .tbody .tr"):
             cells = row.find_all(recursive=False)
-            def field(cls, index):
+            def cell_text(cls, index):
                 node = row.select_one("." + cls)
                 if node is None and len(cells) == 7:
                     node = cells[index]
                 return node.get_text(" ", strip=True) if node else ""
-            company, lab = field("company", 1), field("department", 2)
+            company, lab = cell_text("company", 1), cell_text("department", 2)
             if company and lab:
-                records.append(RndLabRecord(company_name=company, lab_name=lab,
-                    scale=field("scale", 3), research_field=field("field", 4), lab_type=field("sort", 5)))
+                detail_link = row.select_one(".department .detail-link[data-code]")
+                records.append(RndLabRecord(
+                    company_name=company, lab_name=lab, scale=cell_text("scale", 3),
+                    research_field=cell_text("field", 4), lab_type=cell_text("sort", 5),
+                    _detail_code=detail_link["data-code"] if detail_link else "",
+                ))
         if count == 0 and not records:
             if "등록된 게시글이 없습니다" not in section.get_text(" ", strip=True):
                 return None, []
@@ -212,6 +226,46 @@ def _parse_html_records(html: str) -> tuple[int | None, list[RndLabRecord]]:
     return total_count, records
 
 
+def _read_lab_detail(record: RndLabRecord, html: str) -> None:
+    from bs4 import BeautifulSoup
+
+    fields = {}
+    for group in BeautifulSoup(html, "html.parser").select(".view .f__group"):
+        label = group.select_one(".f__label")
+        value = group.select_one(".f__data")
+        if label is not None and value is not None:
+            fields[_clean_header(label.get_text(" ", strip=True))] = value.get_text(" ", strip=True)
+
+    lab_name = fields.get("연구소전담부서명", "")
+    company_name = fields.get("회사명") or fields.get("기업명", "")
+    if (_clean_header(lab_name) != _clean_header(record.lab_name)
+            or _clean_header(company_name) != _clean_header(record.company_name)):
+        record.detail_status = "unverified"
+        return
+
+    record.company_address = fields.get("기업소재지") or None
+    record.lab_address = fields.get("연구소소재지") or None
+    try:
+        record.first_recognition_date = date.fromisoformat(fields.get("최초인정일", "")).isoformat()
+    except ValueError:
+        record.detail_status = "date_unavailable"
+    else:
+        record.detail_status = "confirmed"
+
+
+def _enrich_lab_details(records: list[RndLabRecord], fetch_detail: Callable[[str], str]) -> None:
+    for record in records:
+        if not record._detail_code.isascii() or not record._detail_code.isdigit():
+            continue
+        try:
+            _read_lab_detail(record, fetch_detail(record._detail_code))
+        except Exception as exc:
+            logger.warning("KOITA detail request failed: %s", type(exc).__name__)
+            record.detail_status = "request_error"
+            # All records use the same upstream. Avoid compounding request timeouts.
+            break
+
+
 def _lookup_via_post(business_number: str, timeout_ms: int = 20000) -> RndLabLookupResult:
     digits = normalize_business_number(business_number)
     try:
@@ -275,6 +329,19 @@ def _lookup_via_post(business_number: str, timeout_ms: int = 20000) -> RndLabLoo
             response.raise_for_status()
             response.encoding = response.apparent_encoding or response.encoding
             total_count, records = _parse_html_records(response.text)
+
+            def fetch_detail(code: str) -> str:
+                detail = session.post(
+                    RND_DETAIL_URL,
+                    data={**payload, "yngucode": code},
+                    headers=headers,
+                    timeout=timeout,
+                )
+                detail.raise_for_status()
+                detail.encoding = detail.apparent_encoding or detail.encoding
+                return detail.text
+
+            _enrich_lab_details(records, fetch_detail)
 
         if total_count == 0 and not records:
             return RndLabLookupResult(
@@ -449,6 +516,22 @@ def _lookup_via_playwright(business_number: str, *, headless: bool = True, timeo
                 page.wait_for_timeout(1200)
 
             total_count, records = _parse_html_records(page.content())
+
+            def fetch_detail(code: str) -> str:
+                response = page.request.post(
+                    RND_DETAIL_URL,
+                    form={"yngucode": code, "s_custsuno1": digits, "save_s_custsuno1": digits},
+                    headers={"Referer": RND_SEARCH_URL},
+                    timeout=timeout_ms,
+                )
+                try:
+                    if not response.ok:
+                        raise RuntimeError(f"KOITA detail HTTP {response.status}")
+                    return response.text()
+                finally:
+                    response.dispose()
+
+            _enrich_lab_details(records, fetch_detail)
             browser.close()
 
             if total_count == 0:

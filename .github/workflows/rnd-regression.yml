@@ -32,8 +32,29 @@ jobs:
           actual = '<div class="tr"><div class="td num">1</div><div class="td company"><span class="detail-link" data-code="3419101">비티에스테크놀로지스(주)</span></div><div class="td department"><span class="detail-link" data-code="3419101">비티에스테크놀로지스(주)기술연구소</span></div><div class="td scale">벤처기업</div><div class="td field">출판, 영상, 방송통신 및 정보서비스</div><div class="td sort">연구소</div><div class="td product"></div></div>'
           count, records = _parse_html_records(base.format(1, actual).replace('</div></div></div>', '</div></div><div class="mobile-search-list"><div class="mobile-search-item">비티에스테크놀로지스(주)</div></div></div>', 1))
           assert count == 1 and len(records) == 1
-          assert records[0].to_dict() == {"company_name":"비티에스테크놀로지스(주)","lab_name":"비티에스테크놀로지스(주)기술연구소","scale":"벤처기업","research_field":"출판, 영상, 방송통신 및 정보서비스","lab_type":"연구소"}
+          assert records[0].to_dict() == {"company_name":"비티에스테크놀로지스(주)","lab_name":"비티에스테크놀로지스(주)기술연구소","scale":"벤처기업","research_field":"출판, 영상, 방송통신 및 정보서비스","lab_type":"연구소","first_recognition_date":None,"company_address":None,"lab_address":None,"detail_status":"unavailable"}
           from rnd_tax_checker import rnd_or_kr as rnd
+          fields = {
+              "회사명": records[0].company_name,
+              "연구소/전담부서명": records[0].lab_name,
+              "최초 인정일": "2020-01-02",
+              "기업소재지": "대구",
+              "연구소 소재지": "경산",
+          }
+          def detail_html():
+              groups = "".join(f'<div class="f__group"><div class="f__label">{k}</div><div class="f__data">{v}</div></div>' for k, v in fields.items())
+              return f'<div class="c__form view">{groups}</div>'
+          def get_detail(code):
+              assert code == "3419101"
+              return detail_html()
+          rnd._enrich_lab_details(records, get_detail)
+          assert records[0].first_recognition_date == "2020-01-02"
+          assert records[0].detail_status == "confirmed"
+          assert records[0].company_address == "대구" and records[0].lab_address == "경산"
+          count, other = _parse_html_records(base.format(1, actual))
+          fields["연구소/전담부서명"] = "다른 연구소"
+          rnd._enrich_lab_details(other, get_detail)
+          assert other[0].detail_status == "unverified" and other[0].first_recognition_date is None
           with patch.object(rnd, "_lookup_via_post", return_value=rnd.RndLabLookupResult("response_parse_error", "1358198342", total_count=1)), patch.object(rnd, "_lookup_via_playwright", return_value=rnd.RndLabLookupResult("response_parse_error", "1358198342")):
               result = rnd.lookup_rnd_lab("1358198342").to_dict()
               assert result["status"] == "response_parse_error" and result["total_count"] == 1 and result["records"] == []
